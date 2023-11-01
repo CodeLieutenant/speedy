@@ -1,0 +1,43 @@
+version: "3"
+
+services:
+  influx:
+    image: influxdb:2.7-alpine
+    restart: unless-stopped
+    ports:
+      - 8086:8086
+    volumes:
+      - influxdb:/var/lib/influxdb2
+    environment:
+      DOCKER_INFLUXDB_INIT_USERNAME: speedy
+      DOCKER_INFLUXDB_INIT_PASSWORD: speedy1234
+      DOCKER_INFLUXDB_INIT_ORG: speedy
+      DOCKER_INFLUXDB_INIT_BUCKET: network-speeds
+      DOCKER_INFLUXDB_INIT_RETENTION: 8w
+    networks:
+      - speedy
+  grafana:
+    image: grafana/grafana:10.2.0
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    networks:
+      - speedy
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./docker/grafana-dashboards:/dashboards
+    environment:
+      GF_LOG_MODE: "console"
+      GF_LOG_LEVEL: "info"
+      GF_FEATURE_TOGGLES_ENABLE: ""
+    depends_on:
+      - influx
+
+volumes:
+  influxdb:
+  grafana:
+
+networks:
+  speedy:
+    name: speedy
+    driver: bridge

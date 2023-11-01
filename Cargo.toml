@@ -2,7 +2,32 @@
 name = "speedy"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Dusan Malusev <dusan@dusanmalusev.dev"]
 
 [dependencies]
+clap = { version = "4.4.7", features = ["derive", "env", "unicode", "string"] }
+influxdb = { version = "0.7.1", features = ["derive", "use-serde", "reqwest-client"] }
+lazy_static = "1.4.0"
+rand = { version = "0.8.5" }
+serde = { version = "1.0.190", features = ["serde_derive"] }
+serde_derive = "1.0.190"
+serde_json = { version = "1.0.108", features = ["arbitrary_precision"] }
+thiserror = "1.0.50"
+time = { version = "0.3.30", features = ["serde", "formatting", "parsing", "macros", "rand", "local-offset"] }
+tokio = { version = "1.33.0", features = [
+    "mio",
+    "bytes",
+    "fs",
+    "full",
+    "rt",
+    "socket2",
+    "time",
+    "tokio-macros",
+    "tracing",
+    "libc",
+    "signal",
+    "io-util",
+    "parking_lot",
+    "num_cpus",
+    "test-util",
+] }

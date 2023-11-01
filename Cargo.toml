@@ -31,3 +31,4 @@ tokio = { version = "1.33.0", features = [
     "num_cpus",
     "test-util",
 ] }
+tokio-util = { version = "0.7.10", features = ["io", "rt", "time", "tracing", "net", "io-util"] }

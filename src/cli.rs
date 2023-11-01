@@ -5,30 +5,23 @@ use lazy_static::lazy_static;
 
 lazy_static! {
     static ref EUROPE_SERVERS: Vec<String> = vec![
-        // "speedtest.wtnet.de:5200:5".to_owned(),
-        // "speedtest.wtnet.de:5201:3".to_owned(),
-        // "speedtest.wtnet.de:5202:3".to_owned(),
-        // "speedtest.wtnet.de:5203:3".to_owned(),
-        // "speedtest.wtnet.de:5204:2".to_owned(),
-        // "speedtest.wtnet.de:5205:2".to_owned(),
-        // "speedtest.wtnet.de:5206:1".to_owned(),
-        // "speedtest.wtnet.de:5207:1".to_owned(),
-        // "speedtest.wtnet.de:5208:1".to_owned(),
-        // "speedtest.wtnet.de:5209:1".to_owned(),
-        // "speedtest.ams1.novogara.net:5200:5".to_owned(),
-        // "speedtest.ams1.novogara.net:5201:5".to_owned(),
-        // "speedtest.ams1.novogara.net:5202:5".to_owned(),
-        // "speedtest.ams1.novogara.net:5203:5".to_owned(),
-        // "speedtest.ams1.novogara.net:5204:2".to_owned(),
-        // "speedtest.ams1.novogara.net:5205:2".to_owned(),
-        // "speedtest.ams1.novogara.net:5206:2".to_owned(),
-        // "speedtest.ams1.novogara.net:5207:5".to_owned(),
-        // "speedtest.ams1.novogara.net:5208:2".to_owned(),
-        // "speedtest.ams1.novogara.net:5209:2".to_owned(),
-        // "iperf.online.ne:5209:2".to_owned(),
-        // "scaleway.testdebit.info:5200:2".to_owned(),
-        // "a110.speedtest.wobcom.de:3".to_owned(),
-        // "178.215.228.109:9201:1".to_owned(),
+        "speedtest.init7.net:10".to_string(),
+        "speedtest.lu.buyvm.net:5".to_string(),
+        "iperf.online.net:5209:7".to_string(),
+        "speedtest.serverius.net:5002:1".to_string(),
+        "ams.speedtest.clouvider.net:5201:3".to_string(),
+        "ams.speedtest.clouvider.net:5202:7".to_string(),
+        "ams.speedtest.clouvider.net:5203:7".to_string(),
+        "ams.speedtest.clouvider.net:5204:10".to_string(),
+        "ams.speedtest.clouvider.net:5205:10".to_string(),
+        "ams.speedtest.clouvider.net:5206:10".to_string(),
+        "ams.speedtest.clouvider.net:5207:10".to_string(),
+        "ams.speedtest.clouvider.net:5208:4".to_string(),
+        "ams.speedtest.clouvider.net:5209:4".to_string(),
+        "speedtest.ams1.novogara.net:5209:4".to_string(),
+        "speedtest.ams1.novogara.net:5201:3".to_string(),
+        "speedtest.ams1.novogara.net:5202:4".to_string(),
+        "speedtest.ams1.novogara.net:5204:5".to_string(),
     ];
 }
 
@@ -42,8 +35,8 @@ lazy_static! {
 struct CLI {
     #[arg(short, long, default_value = None)]
     servers: Option<Vec<String>>,
-    #[arg(short, long, required = false, default_value_t = 10)]
-    duration: i32,
+    #[arg(short, long, required = false, default_value_t = 7)]
+    timeout: i32,
 
     #[command(subcommand)]
     command: Commands,
@@ -61,15 +54,20 @@ pub async fn execute() {
 
     match cli.command {
         Commands::Run {} => {
-            let result = iperf3::upload_speed(servers, cli.duration)
-                .await
-                .expect("failed to execute iperf");
-            println!("{}", result.start.cookie);
+            let download = iperf3::download_speed(servers, cli.timeout)
+                .await;
+            let upload = iperf3::upload_speed(servers, cli.timeout)
+                .await;
 
-            let result = iperf3::download_speed(servers, cli.duration)
-                .await
-                .expect("failed to execute iperf");
-            println!("{}", result.start.cookie);
+            match download {
+                Ok(result) => println!("Download samples: {}", result.intervals.len()),
+                Err(err) => eprintln!("Failed to execute download: {}", err),
+            }
+
+            match upload {
+                Ok(result) => println!("Upload samples: {}", result.intervals.len()),
+                Err(err) => eprintln!("Failed to execute upload: {}", err),
+            }
         }
         Commands::Serve {} => todo!(),
     }

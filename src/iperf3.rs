@@ -1,35 +1,37 @@
-use std::io;
-use std::string::FromUtf8Error;
-
 use rand::distributions::WeightedError;
 use rand::seq::SliceRandom;
+use std::io;
+use std::process::Stdio;
+use tokio::io::AsyncReadExt;
+use tokio_util::sync::CancellationToken;
 
 use crate::models;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Failed to execute iperf3 command: {0}")]
-    CommandError(String),
+    #[error("Failed to execute iperf3 command (Server {1}): {0}")]
+    CommandError(String, String),
 
     #[error(
         "Server format is invalid, expected following format \"<server>:<port:OPTIONAL>:<weight>\""
     )]
     InvalidServerFormat,
 
-    #[error(transparent)]
-    UTF8(#[from] FromUtf8Error),
-
-    #[error(transparent)]
+    #[error("failed to execute")]
     IO(#[from] io::Error),
 
     #[error(transparent)]
     Random(#[from] WeightedError),
 
-    #[error(transparent)]
+    #[error("invalid json")]
     JSON(#[from] serde_json::Error),
+
+    #[error("request sending canceled")]
+    Canceled,
 }
 
-pub static IPERF3_BINARY: &'static str = "iperf3";
+pub const IPERF3_BINARY: &'static str = "iperf3";
+pub const IPERF3_DEFAULT_PORT: &'static str = "5001";
 
 pub async fn download_speed<T: AsRef<str>>(
     servs: &[T],
@@ -52,19 +54,33 @@ fn build_iperf3_command(
     download: bool,
 ) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(IPERF3_BINARY);
+    command.kill_on_drop(true);
+
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut dur = if duration > 10 {
+        duration - 5
+    } else {
+        duration - 2
+    }
+    .to_string();
+
+    dur.extend(&['s']);
 
     command.args(&[
         "-J",
         "-Z",
+        "--connect-timeout",
+        "500", // 0.5s
+        "-i",
+        "1",
+        "-t",
+        &dur,
+        if download { "-R" } else { "" },
         "-c",
         addr,
         "-p",
         port,
-        "--connect-timeout",
-        "200ms",
-        "--time",
-        duration.to_string().as_ref(),
-        if download { "-R" } else { "" },
     ]);
 
     command
@@ -91,16 +107,44 @@ async fn execute_speed_test<T: AsRef<str>>(
     let (addr, port) = pick_server(servers)?;
 
     let mut iperf3 = build_iperf3_command(&addr, &port, duration, download);
+    let mut child = iperf3.spawn()?;
+    let token = CancellationToken::new();
 
-    let output = iperf3.output().await?;
+    let sub_token = token.clone();
 
-    if output.status.success() {
-        let data = output.stdout;
-        let deserialized: models::IPerf3 = serde_json::from_slice(&data)?;
-        Ok(deserialized)
-    } else {
-        Err(Error::CommandError(String::from_utf8(output.stdout)?))
-    }
+    let worker_handle = tokio::spawn(async move {
+        tokio::select! {
+            _ = sub_token.cancelled() => {
+                _ = child.kill().await;
+                drop(child);
+                Err(Error::Canceled)
+            }
+            result = child.wait() => {
+                let data = match child.stdout {
+                    Some(ref mut out) => {
+                        let mut data = String::new();
+                        out.read_to_string(&mut data).await?;
+                        data
+                    }
+                    None => String::new(),
+                };
+
+                if result?.success() {
+                    let deserialized: models::IPerf3 = serde_json::from_str(&data)?;
+                    Ok(deserialized)
+                } else {
+                    Err(Error::CommandError(data, format!("{addr}:{port}")))
+                }
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs((duration + 3) as u64)).await;
+        token.cancel();
+    });
+
+    worker_handle.await.unwrap()
 }
 
 fn parse_server<'str, T>(server: T) -> Result<(String, String), Error>
@@ -113,7 +157,7 @@ where
         .next()
         .ok_or_else(|| Error::InvalidServerFormat)?
         .to_string();
-    let port = items.next().unwrap_or("5001").to_string();
+    let port = items.next().unwrap_or(IPERF3_DEFAULT_PORT).to_string();
 
     Ok((addr, port))
 }

@@ -1,15 +1,19 @@
-use nom::character::complete::{char, digit1, line_ending, multispace0, one_of};
+use nom::character::complete::{char, i64, line_ending, multispace0, one_of};
 use nom::combinator::{map, opt};
 use nom::error::{context, ContextError, ParseError};
 use nom::multi::many1;
 use nom::Parser;
-use nom::{combinator::map_res, sequence::Tuple, IResult};
+use nom::{sequence::Tuple, IResult};
+
+#[derive(Debug, Clone)]
 
 pub struct Table {
-    start_hour: u8,
-    end_hour: u8,
-    duration: time::Duration,
+    pub start_hour: u8,
+    pub end_hour: u8,
+    pub duration: time::Duration,
 }
+
+#[derive(Debug, Clone)]
 
 enum Time {
     Second,
@@ -19,18 +23,14 @@ enum Time {
 
 fn hour_span<'a, E>(content: &'a str) -> IResult<&'a str, (u8, u8), E>
 where
-    E: ParseError<&'a str>
-        + ContextError<&'a str>
-        + nom::error::FromExternalError<&'a str, std::num::ParseIntError>,
+    E: ParseError<&'a str> + nom::error::ContextError<&'a str>,
 {
     map(
         context("hour_span", |val| {
             (
-                map_res(context("start_hour", digit1), |start: &str| {
-                    start.parse::<u8>()
-                }),
+                nom::character::complete::u8,
                 char('-'),
-                map_res(context("end_hour", digit1), |end: &str| end.parse::<u8>()),
+                nom::character::complete::u8,
             )
                 .parse(val)
         }),
@@ -41,18 +41,15 @@ where
 
 fn duration<'a, E>(content: &'a str) -> IResult<&'a str, (i64, Time), E>
 where
-    E: ParseError<&'a str>
-        + ContextError<&'a str>
-        + nom::error::FromExternalError<&'a str, &'a str>
-        + nom::error::FromExternalError<&'a str, std::num::ParseIntError>,
+    E: ParseError<&'a str> + ContextError<&'a str>,
 {
     (
-        map_res(context("value", digit1), |val: &str| val.parse::<i64>()),
-        map_res(one_of("smh"), |val| match val {
-            's' => Ok(Time::Second),
-            'm' => Ok(Time::Minute),
-            'h' => Ok(Time::Hour),
-            _ => Err(""),
+        i64,
+        map(one_of("smh"), |val| match val {
+            's' => Time::Second,
+            'm' => Time::Minute,
+            'h' => Time::Hour,
+            _ => panic!("nom parser broke"),
         }),
     )
         .parse(content)
@@ -60,10 +57,7 @@ where
 
 fn duration_map<'a, E>(content: &'a str) -> IResult<&'a str, time::Duration, E>
 where
-    E: ParseError<&'a str>
-        + ContextError<&'a str>
-        + nom::error::FromExternalError<&'a str, &'a str>
-        + nom::error::FromExternalError<&'a str, std::num::ParseIntError>,
+    E: ParseError<&'a str> + ContextError<&'a str>,
 {
     (map(context("value", duration), |(val, time)| match time {
         Time::Second => time::Duration::seconds(val),
@@ -75,10 +69,7 @@ where
 
 fn table<'a, E>(content: &'a str) -> IResult<&'a str, Table, E>
 where
-    E: ParseError<&'a str>
-        + ContextError<&'a str>
-        + nom::error::FromExternalError<&'a str, &'a str>
-        + nom::error::FromExternalError<&'a str, std::num::ParseIntError>,
+    E: ParseError<&'a str> + ContextError<&'a str>,
 {
     map(
         context("table", |val| {
@@ -98,16 +89,27 @@ where
     )
     .parse(content)
 }
-pub fn parse<'a, E>(content: &'a str) -> IResult<&'a str, Vec<Table>, E>
-where
-    E: ParseError<&'a str>
-        + ContextError<&'a str>
-        + nom::error::FromExternalError<&'a str, &'a str>
-        + nom::error::FromExternalError<&'a str, std::num::ParseIntError>,
-{
+pub fn parse(content: &str) -> IResult<&str, Vec<Table>, nom::error::Error<&str>> {
     many1(map(
         context("line", |line| (table, opt(line_ending)).parse(line)),
         |(t, _)| t,
     ))
     .parse(content)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::parse;
+
+    #[test]
+    fn test_parse_single_line() {
+        let result = parse("    0-1 5m");
+        assert!(result.is_ok());
+        let data = result.unwrap().1;
+
+        assert_eq!(1, data.len());
+        assert_eq!(0_u8, data[0].start_hour);
+        assert_eq!(1_u8, data[0].end_hour);
+    }
 }

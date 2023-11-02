@@ -1,4 +1,4 @@
-use nom::character::complete::{char, i64, line_ending, multispace0, one_of};
+use nom::character::complete::{char, i64, u8, line_ending, multispace0, one_of};
 use nom::combinator::{map, opt};
 use nom::error::{context, ContextError, ParseError};
 use nom::multi::many1;
@@ -28,9 +28,9 @@ where
     map(
         context("hour_span", |val| {
             (
-                nom::character::complete::u8,
+                u8,
                 char('-'),
-                nom::character::complete::u8,
+                u8,
             )
                 .parse(val)
         }),

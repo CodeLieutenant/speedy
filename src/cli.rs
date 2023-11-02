@@ -32,7 +32,7 @@ lazy_static! {
     about = "Network speed monitor.",
     long_about = "Monitor your network speed with iperf3 and store your data in InfluxDB for later processing."
 )]
-struct CLI {
+struct Cli {
     #[arg(short, long, default_value = None)]
     servers: Option<Vec<String>>,
     #[arg(short, long, required = false, default_value_t = 7)]
@@ -48,16 +48,17 @@ enum Commands {
     Serve {},
 }
 
+// 0-12 1h
+
+
 pub async fn execute() {
-    let cli = CLI::parse();
+    let cli = Cli::parse();
     let servers = cli.servers.as_ref().unwrap_or(EUROPE_SERVERS.as_ref());
 
     match cli.command {
         Commands::Run {} => {
-            let download = iperf3::download_speed(servers, cli.timeout)
-                .await;
-            let upload = iperf3::upload_speed(servers, cli.timeout)
-                .await;
+            let download = iperf3::download_speed(servers, cli.timeout).await;
+            let upload = iperf3::upload_speed(servers, cli.timeout).await;
 
             match download {
                 Ok(result) => println!("Download samples: {}", result.intervals.len()),
@@ -69,6 +70,6 @@ pub async fn execute() {
                 Err(err) => eprintln!("Failed to execute upload: {}", err),
             }
         }
-        Commands::Serve {} => todo!(),
+        Commands::Serve {} => {},
     }
 }

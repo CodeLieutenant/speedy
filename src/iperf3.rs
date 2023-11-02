@@ -10,7 +10,7 @@ use crate::models;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Failed to execute iperf3 command (Server {1}): {0}")]
-    CommandError(String, String),
+    Command(String, String),
 
     #[error(
         "Server format is invalid, expected following format \"<server>:<port:OPTIONAL>:<weight>\""
@@ -24,14 +24,14 @@ pub enum Error {
     Random(#[from] WeightedError),
 
     #[error("invalid json")]
-    JSON(#[from] serde_json::Error),
+    Json(#[from] serde_json::Error),
 
     #[error("request sending canceled")]
     Canceled,
 }
 
-pub const IPERF3_BINARY: &'static str = "iperf3";
-pub const IPERF3_DEFAULT_PORT: &'static str = "5001";
+pub const IPERF3_BINARY: &str = "iperf3";
+pub const IPERF3_DEFAULT_PORT: &str = "5001";
 
 pub async fn download_speed<T: AsRef<str>>(
     servs: &[T],
@@ -67,7 +67,7 @@ fn build_iperf3_command(
 
     dur.extend(&['s']);
 
-    command.args(&[
+    command.args([
         "-J",
         "-Z",
         "--connect-timeout",
@@ -86,10 +86,10 @@ fn build_iperf3_command(
     command
 }
 
-fn pick_server<'a, 'b>(servers: &'a [impl AsRef<str>]) -> Result<(String, String), Error> {
+fn pick_server(servers: &[impl AsRef<str>]) -> Result<(String, String), Error> {
     let mut rng = rand::thread_rng();
 
-    let server = servers.choose_weighted(&mut rng, |item| match item.as_ref().rfind(":") {
+    let server = servers.choose_weighted(&mut rng, |item| match item.as_ref().rfind(':') {
         Some(idx) if idx + 2 >= item.as_ref().len() => item.as_ref()[idx + 1..]
             .parse::<i32>()
             .expect("Weight has tobe a number"),
@@ -133,7 +133,7 @@ async fn execute_speed_test<T: AsRef<str>>(
                     let deserialized: models::IPerf3 = serde_json::from_str(&data)?;
                     Ok(deserialized)
                 } else {
-                    Err(Error::CommandError(data, format!("{addr}:{port}")))
+                    Err(Error::Command(data, format!("{addr}:{port}")))
                 }
             }
         }
@@ -159,5 +159,8 @@ where
         .to_string();
     let port = items.next().unwrap_or(IPERF3_DEFAULT_PORT).to_string();
 
-    Ok((addr, port))
+    match items.next() {
+        Some(_) => Ok((addr, port)),
+        None => Ok((addr, IPERF3_DEFAULT_PORT.to_string())),
+    }
 }

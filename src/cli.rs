@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
+use tokio::task::JoinSet;
 
-use crate::iperf3;
+use crate::{iperf3, timetable};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -45,13 +46,10 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Run {},
-    Serve {},
+    Serve { timetable: String },
 }
 
-// 0-12 1h
-
-
-pub async fn execute() {
+pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let servers = cli.servers.as_ref().unwrap_or(EUROPE_SERVERS.as_ref());
 
@@ -69,7 +67,42 @@ pub async fn execute() {
                 Ok(result) => println!("Upload samples: {}", result.intervals.len()),
                 Err(err) => eprintln!("Failed to execute upload: {}", err),
             }
+
+            Ok(())
         }
-        Commands::Serve {} => {},
+        Commands::Serve { timetable } => {
+            let path = tokio::fs::canonicalize(timetable.as_str()).await?;
+            let file_content = tokio::fs::read_to_string(path).await?;
+            let mut table = match timetable::parse(&file_content) {
+                Ok((_, table)) => table,
+                Err(_) => {
+                    return Err(format!("Failed to parse timetable file ({}).", &timetable).into())
+                }
+            };
+
+            let invalid: Vec<_> = table
+                .iter()
+                .filter(|item| {
+                    ((item.end_hour - item.start_hour) as i64) < item.duration.whole_hours()
+                })
+                .collect();
+
+            if !invalid.is_empty() {
+                invalid
+                    .iter()
+                    .for_each(|item| eprintln!("Invalid timespan {}", item));
+                return Err("".into());
+            }
+
+            let mut set = JoinSet::new();
+
+            table.drain(..).for_each(|_item| {
+                set.spawn_local(async move {});
+            });
+
+            while let Some(_res) = set.join_next().await {}
+
+            Ok(())
+        }
     }
 }

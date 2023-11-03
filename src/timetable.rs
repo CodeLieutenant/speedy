@@ -1,4 +1,7 @@
-use nom::character::complete::{char, i64, u8, line_ending, multispace0, one_of};
+use std::fmt::Display;
+
+use human_time::ToHumanTimeString;
+use nom::character::complete::{char, i64, line_ending, multispace0, one_of, u8};
 use nom::combinator::{map, opt};
 use nom::error::{context, ContextError, ParseError};
 use nom::multi::many1;
@@ -11,6 +14,22 @@ pub struct Table {
     pub start_hour: u8,
     pub end_hour: u8,
     pub duration: time::Duration,
+}
+
+impl Display for Table {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let d = std::time::Duration::new(
+            self.duration.whole_seconds() as u64,
+            self.duration.whole_nanoseconds() as u32,
+        );
+
+        f.write_fmt(format_args!(
+            "{}-{} {}",
+            self.start_hour,
+            self.end_hour,
+            d.to_human_time_string(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -26,14 +45,7 @@ where
     E: ParseError<&'a str> + nom::error::ContextError<&'a str>,
 {
     map(
-        context("hour_span", |val| {
-            (
-                u8,
-                char('-'),
-                u8,
-            )
-                .parse(val)
-        }),
+        context("hour_span", |val| (u8, char('-'), u8).parse(val)),
         |(start, _, end)| (start, end),
     )
     .parse(content)

@@ -6,5 +6,8 @@ mod timetable;
 
 #[tokio::main]
 async fn main() {
-    cli::execute().await;
+    match cli::execute().await {
+        Ok(_) => todo!(),
+        Err(_) => todo!(),
+    }
 }

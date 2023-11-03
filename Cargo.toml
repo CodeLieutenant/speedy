@@ -6,6 +6,7 @@ authors = ["Dusan Malusev <dusan@dusanmalusev.dev"]
 
 [dependencies]
 clap = { version = "4.4.7", features = ["derive", "env", "unicode", "string"] }
+human-time = "0.1.6"
 influxdb = { version = "0.7.1", features = ["derive", "use-serde", "reqwest-client"] }
 lazy_static = "1.4.0"
 nom = "7.1.3"

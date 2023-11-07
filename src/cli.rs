@@ -1,13 +1,16 @@
+use std::sync::Arc;
+
 use clap::{Parser, Subcommand};
 use tokio::task::JoinSet;
 
-use crate::{iperf3, timetable};
+use crate::influxdb::{Client, Direction, Speed};
+use crate::models::IPerf3;
+use crate::{influxdb, iperf3, timetable};
 use lazy_static::lazy_static;
 
 lazy_static! {
     static ref EUROPE_SERVERS: Vec<String> = vec![
         "speedtest.init7.net:10".to_string(),
-        "speedtest.lu.buyvm.net:5".to_string(),
         "iperf.online.net:5209:7".to_string(),
         "speedtest.serverius.net:5002:1".to_string(),
         "ams.speedtest.clouvider.net:5201:3".to_string(),
@@ -49,28 +52,85 @@ enum Commands {
     Serve { timetable: String },
 }
 
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("IPerf3 Error {0}")]
+    IPerf3(#[from] iperf3::Error),
+
+    #[error("InfluxDB Error {0}")]
+    InfluxDB(#[from] crate::influxdb::Error),
+}
+
+async fn insert(
+    client: &influxdb::Client,
+    result: IPerf3,
+    direction: influxdb::Direction,
+    now: time::OffsetDateTime,
+) -> Result<(), Error> {
+    let speeds = result.intervals.iter().map(|interval| {
+        let stream = &interval.streams[0];
+
+        Speed::new(
+            now + time::Duration::seconds_f64(stream.seconds),
+            direction.clone(),
+            stream.bits_per_second as u64,
+        )
+    });
+
+    client.insert_multiple(speeds).await?;
+
+    Ok(())
+}
+
+async fn run(
+    servers: &[String],
+    client: &crate::influxdb::Client,
+    timeout: i32,
+) -> Result<(), Error> {
+    let now = time::OffsetDateTime::now_utc();
+
+    let download = iperf3::download_speed(servers, timeout).await;
+    let upload = iperf3::upload_speed(servers, timeout).await;
+
+    match download {
+        Ok(result) => {
+            insert(client, result, Direction::Download, now).await?;
+            println!("Values insert into InfluxDB");
+        }
+        Err(err) => eprintln!("Failed to execute download: {}", err),
+    }
+
+    match upload {
+        Ok(result) => {
+            insert(client, result, Direction::Upload, now).await?;
+            println!("Values insert into InfluxDB");
+        }
+        Err(err) => eprintln!("Failed to execute upload: {}", err),
+    }
+
+    Ok(())
+}
+
 pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let servers = cli.servers.as_ref().unwrap_or(EUROPE_SERVERS.as_ref());
+    let servers = Arc::new(cli.servers.unwrap_or(EUROPE_SERVERS.clone()));
+    let influx_db_host =
+        std::env::var("SPEEDY_INFLUX_HOST").unwrap_or("http://localhost:8086".to_string());
+    let influx_db_bucket =
+        std::env::var("SPEEDY_INFLUX_BUCKET").unwrap_or("network_speeds".to_string());
+    let influx_db_token = std::env::var("SPEEDY_INFLUX_TOKEN")
+        .expect("Provide an API Token for InfluxDB in SPEEDY_INFLUX_TOKEN environment variable");
+
+    let client = Client::new(&influx_db_host, &influx_db_bucket, &influx_db_token);
 
     match cli.command {
         Commands::Run {} => {
-            let download = iperf3::download_speed(servers, cli.timeout).await;
-            let upload = iperf3::upload_speed(servers, cli.timeout).await;
-
-            match download {
-                Ok(result) => println!("Download samples: {}", result.intervals.len()),
-                Err(err) => eprintln!("Failed to execute download: {}", err),
-            }
-
-            match upload {
-                Ok(result) => println!("Upload samples: {}", result.intervals.len()),
-                Err(err) => eprintln!("Failed to execute upload: {}", err),
-            }
-
+            run(&servers, &client, cli.timeout).await?;
             Ok(())
         }
         Commands::Serve { timetable } => {
+            let client = Arc::new(client);
+
             let path = tokio::fs::canonicalize(timetable.as_str()).await?;
             let file_content = tokio::fs::read_to_string(path).await?;
             let mut table = match timetable::parse(&file_content) {
@@ -82,7 +142,7 @@ pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
 
             let invalid: Vec<_> = table
                 .iter()
-                .filter(|item| {
+                .filter(|item: &&timetable::Table| {
                     ((item.end_hour - item.start_hour) as i64) < item.duration.whole_hours()
                 })
                 .collect();
@@ -91,13 +151,27 @@ pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
                 invalid
                     .iter()
                     .for_each(|item| eprintln!("Invalid timespan {}", item));
-                return Err("".into());
+                return Err("Timetable not provided".into());
             }
 
             let mut set = JoinSet::new();
 
-            table.drain(..).for_each(|_item| {
-                set.spawn_local(async move {});
+            table.drain(..).for_each(|item| {
+                let c = Arc::clone(&client);
+                let servers = Arc::clone(&servers);
+                let duration =
+                    tokio::time::Duration::from_nanos(item.duration.whole_nanoseconds() as u64);
+                set.spawn_local(async move {
+                    loop {
+                        let hour = time::OffsetDateTime::now_utc().hour();
+
+                        if hour >= item.start_hour && hour < item.end_hour {
+                            run(&servers, &c, cli.timeout).await.unwrap();
+                        }
+
+                        tokio::time::sleep(duration).await;
+                    }
+                });
             });
 
             while let Some(_res) = set.join_next().await {}

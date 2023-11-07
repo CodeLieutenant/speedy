@@ -7,7 +7,7 @@ mod timetable;
 #[tokio::main]
 async fn main() {
     match cli::execute().await {
-        Ok(_) => todo!(),
-        Err(_) => todo!(),
+        Ok(_) => println!("Job finished"),
+        Err(e) => eprintln!("{e}"),
     }
 }

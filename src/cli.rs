@@ -41,6 +41,8 @@ struct Cli {
     servers: Option<Vec<String>>,
     #[arg(short, long, required = false, default_value_t = 7)]
     timeout: i32,
+    #[arg(short, long, required = false, default_value_t = 3)]
+    retries: i32,
 
     #[command(subcommand)]
     command: Commands,
@@ -86,13 +88,35 @@ async fn run(
     servers: &[String],
     client: &crate::influxdb::Client,
     timeout: i32,
+    retries: i32,
 ) -> Result<(), Error> {
     let now = time::OffsetDateTime::now_utc();
 
-    let download = iperf3::download_speed(servers, timeout).await;
-    let upload = iperf3::upload_speed(servers, timeout).await;
+    let download = || async {
+        for _ in 0..retries {
+            let result = iperf3::download_speed(servers, timeout).await;
 
-    match download {
+            if result.is_ok() {
+                return result;
+            }
+        }
+
+        Err(iperf3::Error::Canceled)
+    };
+
+    let upload = || async {
+        for _ in 0..retries {
+            let result = iperf3::upload_speed(servers, timeout).await;
+
+            if result.is_ok() {
+                return result;
+            }
+        }
+
+        Err(iperf3::Error::Canceled)
+    };
+
+    match download().await {
         Ok(result) => {
             insert(client, result, Direction::Download, now).await?;
             println!("Values insert into InfluxDB");
@@ -100,7 +124,7 @@ async fn run(
         Err(err) => eprintln!("Failed to execute download: {}", err),
     }
 
-    match upload {
+    match upload().await {
         Ok(result) => {
             insert(client, result, Direction::Upload, now).await?;
             println!("Values insert into InfluxDB");
@@ -125,7 +149,7 @@ pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Run {} => {
-            run(&servers, &client, cli.timeout).await?;
+            run(&servers, &client, cli.timeout, cli.retries).await?;
             Ok(())
         }
         Commands::Serve { timetable } => {
@@ -166,7 +190,7 @@ pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
                         let hour = time::OffsetDateTime::now_utc().hour();
 
                         if hour >= item.start_hour && hour < item.end_hour {
-                            run(&servers, &c, cli.timeout).await.unwrap();
+                            run(&servers, &c, cli.timeout, cli.retries).await.unwrap();
                         }
 
                         tokio::time::sleep(duration).await;

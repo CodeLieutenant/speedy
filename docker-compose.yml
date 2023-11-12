@@ -25,7 +25,6 @@ services:
       - speedy
     volumes:
       - grafana:/var/lib/grafana
-      - ./docker/grafana-dashboards:/dashboards
     environment:
       GF_LOG_MODE: "console"
       GF_LOG_LEVEL: "info"

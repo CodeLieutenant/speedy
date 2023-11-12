@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Run",
+      "cargo": {
+        "args": ["build", "--bin=speedy", "--package=speedy"],
+        "filter": {
+          "name": "speedy",
+          "kind": "bin"
+        }
+      },
+      "args": ["run"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Serve",
+      "cargo": {
+        "args": ["build", "--bin=speedy", "--package=speedy"],
+        "filter": {
+          "name": "speedy",
+          "kind": "bin"
+        }
+      },
+      "args": ["serve"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Unit Tests",
+      "cargo": {
+        "args": ["test", "--no-run", "--bin=speedy", "--package=speedy"],
+        "filter": {
+          "name": "speedy",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

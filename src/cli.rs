@@ -51,7 +51,10 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Run {},
-    Serve { timetable: String },
+    Serve {
+        #[arg(short, long, required = false, default_value = "config.timetable")]
+        timetable: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,27 +96,29 @@ async fn run(
     let now = time::OffsetDateTime::now_utc();
 
     let download = || async {
-        for _ in 0..retries {
-            let result = iperf3::download_speed(servers, timeout).await;
+        let mut result = None;
 
-            if result.is_ok() {
-                return result;
+        for _ in 0..retries {
+            match iperf3::download_speed(servers, timeout).await {
+                Ok(val) => return Ok(val),
+                Err(err) => result = Some(Err(err)),
             }
         }
 
-        Err(iperf3::Error::Canceled)
+        result.unwrap_or(Err(iperf3::Error::Canceled))
     };
 
     let upload = || async {
-        for _ in 0..retries {
-            let result = iperf3::upload_speed(servers, timeout).await;
+        let mut result = None;
 
-            if result.is_ok() {
-                return result;
+        for _ in 0..retries {
+            match iperf3::upload_speed(servers, timeout).await {
+                Ok(val) => return Ok(val),
+                Err(err) => result = Some(Err(err)),
             }
         }
 
-        Err(iperf3::Error::Canceled)
+        result.unwrap_or(Err(iperf3::Error::Canceled))
     };
 
     match download().await {
@@ -127,7 +132,6 @@ async fn run(
     match upload().await {
         Ok(result) => {
             insert(client, result, Direction::Upload, now).await?;
-            println!("Values insert into InfluxDB");
         }
         Err(err) => eprintln!("Failed to execute upload: {}", err),
     }
@@ -164,28 +168,31 @@ pub async fn execute() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let invalid: Vec<_> = table
+            let invalid_count = table
                 .iter()
-                .filter(|item: &&timetable::Table| {
-                    ((item.end_hour - item.start_hour) as i64) < item.duration.whole_hours()
-                })
-                .collect();
+                .filter(|item| {
+                    let res = item.end_hour <= 24
+                        && ((item.end_hour - item.start_hour) as i64) < item.duration.whole_hours();
 
-            if !invalid.is_empty() {
-                invalid
-                    .iter()
-                    .for_each(|item| eprintln!("Invalid timespan {}", item));
-                return Err("Timetable not provided".into());
+                    if res {
+                        eprintln!("Invalid timerange: {item}");
+                    }
+
+                    res
+                })
+                .count();
+
+            if invalid_count > 0 {
+                return Err("File contains invalid TimeRange".into());
             }
 
             let mut set = JoinSet::new();
-
             table.drain(..).for_each(|item| {
                 let c = Arc::clone(&client);
                 let servers = Arc::clone(&servers);
                 let duration =
                     tokio::time::Duration::from_nanos(item.duration.whole_nanoseconds() as u64);
-                set.spawn_local(async move {
+                set.spawn(async move {
                     loop {
                         let hour = time::OffsetDateTime::now_utc().hour();
 

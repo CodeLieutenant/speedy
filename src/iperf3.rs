@@ -17,13 +17,16 @@ pub enum Error {
     )]
     InvalidServerFormat,
 
-    #[error("failed to execute")]
+    #[error("install iperf3 command")]
+    IperfCommandDoesNotExist,
+
+    #[error(transparent)]
     IO(#[from] io::Error),
 
     #[error(transparent)]
     Random(#[from] WeightedError),
 
-    #[error("invalid json")]
+    #[error("invalid json: {0}")]
     Json(#[from] serde_json::Error),
 
     #[error("request sending canceled")]
@@ -37,6 +40,7 @@ pub async fn download_speed<T: AsRef<str>>(
     servs: &[T],
     duration: i32,
 ) -> Result<models::IPerf3, Error> {
+    check_iperf3_command().await?;
     execute_speed_test(servs, duration, true).await
 }
 
@@ -44,7 +48,21 @@ pub async fn upload_speed<T: AsRef<str>>(
     servs: &[T],
     duration: i32,
 ) -> Result<models::IPerf3, Error> {
+    check_iperf3_command().await?;
     execute_speed_test(servs, duration, false).await
+}
+
+async fn check_iperf3_command() -> Result<(), Error> {
+    let mut command = tokio::process::Command::new(IPERF3_BINARY);
+    command.kill_on_drop(true);
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    command.arg("--version");
+
+    match command.status().await {
+        Ok(_) => Ok(()),
+        Err(_) => Err(Error::IperfCommandDoesNotExist),
+    }
 }
 
 fn build_iperf3_command(
@@ -92,7 +110,7 @@ fn pick_server(servers: &[impl AsRef<str>]) -> Result<(String, String), Error> {
     let server = servers.choose_weighted(&mut rng, |item| match item.as_ref().rfind(':') {
         Some(idx) if idx + 2 >= item.as_ref().len() => item.as_ref()[idx + 1..]
             .parse::<i32>()
-            .expect("Weight has tobe a number"),
+            .expect("Weight needs to be a number"),
         Some(_) | None => 0,
     })?;
 

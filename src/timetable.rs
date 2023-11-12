@@ -95,7 +95,10 @@ where
         }),
         |(_, (start, end), _, duration)| Table {
             start_hour: start,
-            end_hour: end,
+            end_hour: match end {
+                0 => 24,
+                res => res,
+            },
             duration,
         },
     )
